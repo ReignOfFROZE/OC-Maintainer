@@ -17,9 +17,7 @@ local unicode = require("unicode")
 local gpu = component.gpu
 
 local ae2 = require("src.AE2")
-local cfg = require("config")
 
-local sleepInterval = cfg.sleep
 local WATCH_INTERVAL = 2 -- seconds between watcher-thread CPU polls
 
 local COLOR = {
@@ -36,30 +34,10 @@ local COLOR = {
     stripeBg    = 0x2D2D2D, -- background for every other item row
 }
 
--- Flatten config groups into an ordered list of items.
+local cfg
+local sleepInterval
 local items = {}
-for groupIdx, group in ipairs(cfg.items) do
-    for name, entry in pairs(group.entries) do
-        table.insert(items, {
-            name = name,
-            group = groupIdx,
-            threshold = entry[1],
-            count = entry[2],
-            fluid = entry[3],
-            state = {stored = nil, prev = nil, status = "Pending", color = COLOR.dim, msg = nil},
-        })
-    end
-end
-table.sort(items, function(a, b)
-    if a.group ~= b.group then return a.group < b.group end
-    return a.name < b.name
-end)
-
--- Non-fluid labels, for the once-per-pass batched stored lookup.
 local itemLabels = {}
-for _, it in ipairs(items) do
-    if not it.fluid then table.insert(itemLabels, it.name) end
-end
 
 -- Use the biggest resolution the GPU/screen pair supports for maximum rows.
 gpu.setResolution(gpu.maxResolution())
@@ -81,7 +59,7 @@ local ROW_CPU_FIRST   = ROW_FAIL_HEADER - CPU_LINES
 local ROW_CPU_HEADER  = ROW_CPU_FIRST - 1
 local ROW_LAST_ITEM   = ROW_CPU_HEADER - 2
 
-local maxVisible = math.max(0, math.min(#items, ROW_LAST_ITEM - ROW_FIRST_ITEM + 1))
+local maxVisible = 0
 
 -- Column layout: | G | Item | Stored | trend | bar | % | Target | Status |
 local COL_GROUP_W  = 3
@@ -118,6 +96,54 @@ local passRunning = false
 local passCount = 0
 local nextPass = 0
 local failLog = {}
+
+-- (Re)load config.lua and rebuild the item list. Busts Lua's module cache so
+-- edits made after startup are picked up. Dashboard state is preserved for
+-- items that still exist. Returns false plus an error message on a bad config.
+local function loadConfig()
+    package.loaded["config"] = nil
+    local ok, result = pcall(require, "config")
+    if not ok then
+        return false, result
+    end
+    cfg = result
+    sleepInterval = cfg.sleep
+
+    local oldState = {}
+    for _, it in ipairs(items) do
+        oldState[it.name] = it.state
+    end
+
+    items = {}
+    for groupIdx, group in ipairs(cfg.items) do
+        for name, entry in pairs(group.entries) do
+            table.insert(items, {
+                name = name,
+                group = groupIdx,
+                threshold = entry[1],
+                count = entry[2],
+                fluid = entry[3],
+                state = oldState[name]
+                    or {stored = nil, prev = nil, status = "Pending", color = COLOR.dim, msg = nil},
+            })
+        end
+    end
+    table.sort(items, function(a, b)
+        if a.group ~= b.group then return a.group < b.group end
+        return a.name < b.name
+    end)
+
+    -- Non-fluid labels, for the once-per-pass batched stored lookup.
+    itemLabels = {}
+    for _, it in ipairs(items) do
+        if not it.fluid then table.insert(itemLabels, it.name) end
+    end
+
+    maxVisible = math.max(0, math.min(#items, ROW_LAST_ITEM - ROW_FIRST_ITEM + 1))
+    return true
+end
+
+assert(loadConfig())
 
 local function leftAlign(value, width)
     local s = tostring(value)
@@ -325,7 +351,7 @@ local function drawStatic()
     drawCell(1, ROW_FAIL_HEADER, "Recent failures", screenW, COLOR.header)
     drawFailLog()
     drawCell(1, ROW_FOOTER,
-        "[Q]uit  [P]ause  [R]efresh+clear cache  |  tap item: force craft  |  tap status: last message",
+        "[Q]uit  [P]ause  [R]efresh  [C]onfig reload  |  tap item: force craft  |  tap status: last message",
         screenW, COLOR.dim)
 end
 
@@ -451,6 +477,20 @@ local function onKey(char)
         ae2.clearCache()
         forcePass = true
         showDetail("Cache cleared, refreshing...", COLOR.dim)
+    elseif c == "c" then
+        local ok, err = loadConfig()
+        if ok then
+            drawStatic()
+            forcePass = true
+            if #items > maxVisible then
+                showDetail("Config reloaded: " .. #items .. " items, "
+                    .. (#items - maxVisible) .. " don't fit on screen!", COLOR.requested)
+            else
+                showDetail("Config reloaded: " .. #items .. " items.", COLOR.ok)
+            end
+        else
+            showDetail("Config reload failed: " .. tostring(err), COLOR.failed)
+        end
     end
 end
 

@@ -64,7 +64,8 @@ Dashboard features:
   the next full pass.
 
 Controls: `Q` quits, `P` pauses, `R` clears the craftable cache and forces a
-refresh. Tap an item row to force-request one batch immediately (ignores the
+refresh, `C` re-reads `config.lua` and rebuilds the table without restarting.
+Tap an item row to force-request one batch immediately (ignores the
 threshold); tap its Status cell to see the item's full last message.
 
 > [!NOTE]
@@ -120,7 +121,8 @@ Global options:
   in-group randomization.
 
 > [!NOTE]
-> Reboot the computer and rerun the maintainer after changing config values.
+> For `Maintainer`, reboot the computer and rerun it after changing config
+> values. In `Maintainer2`, press `C` to reload the config live instead.
 
 > [!CAUTION]
 > Smart blocking can alter the effectiveness of this program.
