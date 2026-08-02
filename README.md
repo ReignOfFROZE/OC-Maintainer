@@ -52,6 +52,21 @@ Dashboard statuses:
 | Failed      | red    | The craft request was rejected                 |
 | Uncraftable | orange | No pattern for this item was found             |
 
+Dashboard features:
+
+- Fill bars, percentages, and trend arrows (`↑`/`↓`) show how close each item
+  is to its threshold and which way it moved since the last pass.
+- A summary line counts items per status at a glance.
+- A crafting CPU panel shows what every CPU is working on.
+- A rolling log keeps the last few failures on screen with timestamps.
+- A background watcher polls the crafting CPUs between passes, so Requested
+  items flip to Crafting and finished crafts flip to OK without waiting for
+  the next full pass.
+
+Controls: `Q` quits, `P` pauses, `R` clears the craftable cache and forces a
+refresh. Tap an item row to force-request one batch immediately (ignores the
+threshold); tap its Status cell to see the item's full last message.
+
 > [!NOTE]
 > `Maintainer2` is a proof of concept: it iterates groups in config order and
 > does not implement the priority/randomization/batch logic from `Maintainer`.
