@@ -91,10 +91,37 @@ local function getEssentiaAmount(stack)
     addCandidate(stack.name)
     addCandidate(stack.label)
 
+    local function stackAmount(s)
+        if type(s) == "table" then
+            return s.amount or s.size
+        end
+        return nil
+    end
+
+    -- Keyed lookups come back either as the stack table itself or wrapped in
+    -- an array ({} when nothing matched — which is truthy, so never treat a
+    -- bare non-nil result as a hit).
     for _, key in ipairs(candidates) do
-        local ok, found = pcall(ME.getEssentiaInNetwork, key)
-        if ok and found then
-            return found.amount or found.size or 0
+        local ok, res = pcall(ME.getEssentiaInNetwork, key)
+        if ok and type(res) == "table" then
+            local amt = stackAmount(res) or stackAmount(res[1])
+            if amt then return amt end
+        end
+    end
+
+    -- Fallback: scan the full essentia storage list (small) and match the
+    -- aspect by name or label, case-insensitively.
+    local ok, list = pcall(ME.getEssentiaInNetwork)
+    if ok and type(list) == "table" then
+        for _, entry in ipairs(list) do
+            if type(entry) == "table" then
+                for _, field in ipairs({entry.name, entry.label}) do
+                    if type(field) == "string"
+                        and (candidates[field] or candidates[field:lower()]) then
+                        return stackAmount(entry) or 0
+                    end
+                end
+            end
         end
     end
     return 0
