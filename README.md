@@ -65,8 +65,12 @@ Dashboard features:
 
 Controls: `Q` quits, `P` pauses, `R` clears the craftable cache and forces a
 refresh, `C` re-reads `config.lua` and rebuilds the table without restarting.
-Tap an item row to force-request one batch immediately (ignores the
-threshold); tap its Status cell to see the item's full last message.
+When the config has more items than screen rows, the table becomes a
+scrollable window — navigate with the arrow keys, `PgUp`/`PgDn`,
+`Home`/`End`, or the mouse wheel; every item is maintained whether or not it
+is currently visible. Tap an item row to force-request one batch immediately
+(ignores the threshold); tap its Status cell to see the item's full last
+message.
 
 > [!NOTE]
 > `Maintainer2` is a proof of concept: it iterates groups in config order and

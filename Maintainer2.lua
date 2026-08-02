@@ -11,6 +11,7 @@
 local component = require("component")
 local computer = require("computer")
 local event = require("event")
+local keyboard = require("keyboard")
 local term = require("term")
 local thread = require("thread")
 local unicode = require("unicode")
@@ -59,7 +60,7 @@ local ROW_CPU_FIRST   = ROW_FAIL_HEADER - CPU_LINES
 local ROW_CPU_HEADER  = ROW_CPU_FIRST - 1
 local ROW_LAST_ITEM   = ROW_CPU_HEADER - 2
 
-local maxVisible = 0
+local visibleRows = math.max(0, ROW_LAST_ITEM - ROW_FIRST_ITEM + 1)
 
 -- Column layout: | G | Item | Stored | trend | bar | % | Target | Status |
 local COL_GROUP_W  = 3
@@ -96,6 +97,7 @@ local passRunning = false
 local passCount = 0
 local nextPass = 0
 local failLog = {}
+local scrollOffset = 0
 
 -- (Re)load config.lua and rebuild the item list. Busts Lua's module cache so
 -- edits made after startup are picked up. Dashboard state is preserved for
@@ -139,7 +141,7 @@ local function loadConfig()
         if not it.fluid then table.insert(itemLabels, it.name) end
     end
 
-    maxVisible = math.max(0, math.min(#items, ROW_LAST_ITEM - ROW_FIRST_ITEM + 1))
+    scrollOffset = math.max(0, math.min(scrollOffset, #items - visibleRows))
     return true
 end
 
@@ -190,6 +192,22 @@ local function fillColor(ratio)
     return COLOR.failed
 end
 
+-- Maps an item index to its current screen row, or nil if scrolled out of view.
+local function itemRow(i)
+    if i < scrollOffset + 1 or i > scrollOffset + visibleRows then return nil end
+    return ROW_FIRST_ITEM + (i - scrollOffset - 1)
+end
+
+local function drawScrollIndicator()
+    local text = ""
+    if #items > visibleRows then
+        local first = scrollOffset + 1
+        local last = math.min(scrollOffset + visibleRows, #items)
+        text = "items " .. first .. "-" .. last .. " of " .. #items
+    end
+    drawCell(screenW - 30 + 1, ROW_SUMMARY, text, 30, COLOR.dim, true)
+end
+
 local function drawTitle()
     gpu.setBackground(COLOR.bg)
     gpu.fill(1, ROW_TITLE, screenW, 1, " ")
@@ -205,7 +223,7 @@ end
 
 local function drawSummary()
     local counts = {}
-    for i = 1, maxVisible do
+    for i = 1, #items do
         local s = items[i].state.status
         counts[s] = (counts[s] or 0) + 1
     end
@@ -232,6 +250,7 @@ local function drawSummary()
             x = x + unicode.len(segment)
         end
     end
+    drawScrollIndicator()
 end
 
 local function showDetail(text, color)
@@ -239,10 +258,15 @@ local function showDetail(text, color)
 end
 
 local function drawItemRow(i)
+    local row = itemRow(i)
+    if not row then return end
     local it = items[i]
     local st = it.state
-    local row = ROW_FIRST_ITEM + i - 1
     local bg = rowBg(row)
+
+    drawCell(X_GROUP, row, it.group, COL_GROUP_W, COLOR.dim, false, bg)
+    drawCell(X_NAME, row, it.name, COL_NAME_W, COLOR.label, false, bg)
+    drawCell(X_THRESH, row, fmtNum(it.threshold), COL_THRESH_W, COLOR.dim, true, bg)
 
     local ratio = nil
     if st.stored ~= nil and it.threshold and it.threshold > 0 then
@@ -277,6 +301,24 @@ local function drawItemRow(i)
     end
 
     drawCell(X_STATUS, row, st.status, COL_STATUS_W, st.color, false, bg)
+end
+
+local function redrawItems()
+    for row = ROW_FIRST_ITEM, ROW_LAST_ITEM do
+        local i = row - ROW_FIRST_ITEM + scrollOffset + 1
+        -- Paint the whole row first so the stripe covers column gaps too.
+        gpu.setBackground(rowBg(row))
+        gpu.fill(1, row, screenW, 1, " ")
+        if items[i] then drawItemRow(i) end
+    end
+    drawScrollIndicator()
+end
+
+local function setScroll(offset)
+    offset = math.max(0, math.min(offset, #items - visibleRows))
+    if offset == scrollOffset then return end
+    scrollOffset = offset
+    redrawItems()
 end
 
 local function drawFailLog()
@@ -334,24 +376,13 @@ local function drawStatic()
     drawCell(X_THRESH, ROW_HEADER, "Target", COL_THRESH_W, COLOR.header, true)
     drawCell(X_STATUS, ROW_HEADER, "Status", COL_STATUS_W, COLOR.header)
 
-    for i = 1, maxVisible do
-        local it = items[i]
-        local row = ROW_FIRST_ITEM + i - 1
-        local bg = rowBg(row)
-        -- Paint the whole row first so the stripe covers column gaps too.
-        gpu.setBackground(bg)
-        gpu.fill(1, row, screenW, 1, " ")
-        drawCell(X_GROUP, row, it.group, COL_GROUP_W, COLOR.dim, false, bg)
-        drawCell(X_NAME, row, it.name, COL_NAME_W, COLOR.label, false, bg)
-        drawCell(X_THRESH, row, fmtNum(it.threshold), COL_THRESH_W, COLOR.dim, true, bg)
-        drawItemRow(i)
-    end
+    redrawItems()
 
     drawCell(1, ROW_CPU_HEADER, "Crafting CPUs", 14, COLOR.header)
     drawCell(1, ROW_FAIL_HEADER, "Recent failures", screenW, COLOR.header)
     drawFailLog()
     drawCell(1, ROW_FOOTER,
-        "[Q]uit  [P]ause  [R]efresh  [C]onfig reload  |  tap item: force craft  |  tap status: last message",
+        "[Q]uit [P]ause [R]efresh [C]onfig  |  arrows/PgUp/PgDn/scroll: navigate  |  tap item: force craft, tap status: message",
         screenW, COLOR.dim)
 end
 
@@ -370,8 +401,10 @@ local function updateItem(i, itemsCrafting, storedMap)
     if itemsCrafting[it.name] then
         newStatus, newColor = "Crafting", COLOR.crafting
     else
-        local row = ROW_FIRST_ITEM + i - 1
-        drawCell(X_STATUS, row, "Checking...", COL_STATUS_W, COLOR.dim, false, rowBg(row))
+        local row = itemRow(i)
+        if row then
+            drawCell(X_STATUS, row, "Checking...", COL_STATUS_W, COLOR.dim, false, rowBg(row))
+        end
         local success, answer = ae2.requestItem(it.name, it.threshold, it.count, it.fluid, st.stored)
         st.msg = answer
         if success == true then
@@ -404,7 +437,7 @@ local function runPass()
         if c.crafting then itemsCrafting[c.crafting] = true end
     end
     local storedMap = ae2.getStoredMap(itemLabels)
-    for i = 1, maxVisible do
+    for i = 1, #items do
         updateItem(i, itemsCrafting, storedMap)
     end
     drawSummary()
@@ -418,7 +451,7 @@ end
 local function pollWatched()
     local watched = {}
     local any = false
-    for i = 1, maxVisible do
+    for i = 1, #items do
         local s = items[i].state.status
         if s == "Requested" or s == "Crafting" then
             watched[items[i].name] = i
@@ -465,7 +498,13 @@ local watcher = thread.create(function()
     end
 end)
 
-local function onKey(char)
+local function onKey(char, code)
+    if code == keyboard.keys.up then return setScroll(scrollOffset - 1) end
+    if code == keyboard.keys.down then return setScroll(scrollOffset + 1) end
+    if code == keyboard.keys.pageUp then return setScroll(scrollOffset - visibleRows) end
+    if code == keyboard.keys.pageDown then return setScroll(scrollOffset + visibleRows) end
+    if code == keyboard.keys.home then return setScroll(0) end
+    if code == keyboard.keys["end"] then return setScroll(#items) end
     if char <= 0 or char > 255 then return end
     local c = string.char(char):lower()
     if c == "q" then
@@ -482,12 +521,7 @@ local function onKey(char)
         if ok then
             drawStatic()
             forcePass = true
-            if #items > maxVisible then
-                showDetail("Config reloaded: " .. #items .. " items, "
-                    .. (#items - maxVisible) .. " don't fit on screen!", COLOR.requested)
-            else
-                showDetail("Config reloaded: " .. #items .. " items.", COLOR.ok)
-            end
+            showDetail("Config reloaded: " .. #items .. " items.", COLOR.ok)
         else
             showDetail("Config reload failed: " .. tostring(err), COLOR.failed)
         end
@@ -495,8 +529,9 @@ local function onKey(char)
 end
 
 local function onTouch(x, y)
-    local i = y - ROW_FIRST_ITEM + 1
-    if i < 1 or i > maxVisible then return end
+    if y < ROW_FIRST_ITEM or y > ROW_LAST_ITEM then return end
+    local i = y - ROW_FIRST_ITEM + scrollOffset + 1
+    if i > #items then return end
     local it = items[i]
     if x >= X_STATUS then
         showDetail(it.name .. ": " .. (it.state.msg or "no message yet"))
@@ -518,9 +553,6 @@ end
 
 local function main()
     drawStatic()
-    if #items > maxVisible then
-        showDetail((#items - maxVisible) .. " item(s) don't fit on screen and are not shown!", COLOR.requested)
-    end
     while running do
         if forcePass or (not paused and computer.uptime() >= nextPass) then
             forcePass = false
@@ -531,9 +563,11 @@ local function main()
         local ev = table.pack(event.pull(timeout))
         local name = ev[1]
         if name == "key_down" then
-            onKey(ev[3])
+            onKey(ev[3], ev[4])
         elseif name == "touch" then
             onTouch(ev[3], ev[4])
+        elseif name == "scroll" then
+            setScroll(scrollOffset - ev[5] * 3)
         elseif name == "interrupted" then
             running = false
         end

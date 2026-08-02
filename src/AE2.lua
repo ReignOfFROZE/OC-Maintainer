@@ -71,23 +71,56 @@ end
 -- every stack in the network on each query). Matching then happens by label,
 -- because exact name+damage+NBT lookups miss items whose stored NBT differs from
 -- the pattern output (e.g. GT++ chem items like Alumina Milling Balls).
+-- Essentia lives on its own AE storage channel (Thaumic Energistics) and is
+-- invisible to the item-channel queries below. The GTNH fork exposes a keyed
+-- getEssentiaInNetwork(aspectName) lookup for it. The parser behind it does a
+-- case-sensitive Aspect.getAspect(name) that ERRORS on a miss, so try the
+-- converted name/label as-is and lowercased, wrapped in pcall.
+local function getEssentiaAmount(stack)
+    local candidates = {}
+    local function addCandidate(s)
+        if type(s) == "string" then
+            for _, key in ipairs({s, s:lower()}) do
+                if not candidates[key] then
+                    candidates[key] = true
+                    table.insert(candidates, key)
+                end
+            end
+        end
+    end
+    addCandidate(stack.name)
+    addCandidate(stack.label)
+
+    for _, key in ipairs(candidates) do
+        local ok, found = pcall(ME.getEssentiaInNetwork, key)
+        if ok and found then
+            return found.amount or found.size or 0
+        end
+    end
+    return 0
+end
+
 function AE2.getStoredMap(labels)
     local seenIds = {}
     local idList = {}
     local wanted = {}
+    local map = {}
     for _, label in ipairs(labels) do
-        wanted[label] = true
         local craftable = getCraftableForItem(label)
-        if craftable then
-            local stack = craftable.getStack()
-            if stack.name and not seenIds[stack.name] then
+        local stack = craftable and craftable.getStack() or nil
+        if stack and stack.damage == nil then
+            -- No item fields on the craftable: it lives on another storage
+            -- channel (essentia), so query that channel directly.
+            map[label] = getEssentiaAmount(stack)
+        else
+            wanted[label] = true
+            if stack and stack.name and not seenIds[stack.name] then
                 seenIds[stack.name] = true
                 table.insert(idList, stack.name)
             end
         end
     end
 
-    local map = {}
     if #idList > 0 then
         for _, stack in ipairs(ME.getItemsInNetworkById(idList)) do
             if wanted[stack.label] then

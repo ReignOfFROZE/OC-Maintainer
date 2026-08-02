@@ -37,7 +37,11 @@ cfg["items"] = {
             ["Stemcells"] = {2048, 4096},
             ["Unknown Crystal Shard"] = {1024, 2048},
             ["Plutonium 239 Rod"] = {1024, 2048},
-            ["Tiny Pile of Infinity Catalyst Dust"] = {256, 512}
+            ["Tiny Pile of Infinity Catalyst Dust"] = {256, 512},
+            ["Naquadah Dust"] = {512, 512},
+            ["Praecantatio"] = {2048, 1024}
+            -- Example item without threshold:
+            -- ["My Item"] = {nil, 1024}
         }
     }
 }
@@ -57,3 +61,4 @@ cfg["randomizeFrequency"] = 2
 cfg["priorityMode"] = false
 
 return cfg
+
