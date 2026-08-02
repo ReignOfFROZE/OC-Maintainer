@@ -21,6 +21,8 @@ local COLOR = {
     crafting    = 0x00FFFF, -- CPU currently working on it
     failed      = 0xFF0000, -- craft request failed
     uncraftable = 0xFF8000, -- no pattern for this item
+    bg          = 0x000000,
+    stripeBg    = 0x2D2D2D, -- background for every other item row
 }
 
 -- Flatten config groups into an ordered list of items.
@@ -73,7 +75,15 @@ local function rightAlign(value, width)
     return string.rep(" ", width - #s) .. s
 end
 
-local function drawCell(x, row, text, width, color, alignRight)
+local function rowBg(row)
+    if (row - ROW_FIRST_ITEM) % 2 == 1 then
+        return COLOR.stripeBg
+    end
+    return COLOR.bg
+end
+
+local function drawCell(x, row, text, width, color, alignRight, bg)
+    gpu.setBackground(bg or COLOR.bg)
     gpu.setForeground(color)
     if alignRight then
         gpu.set(x, row, rightAlign(text, width))
@@ -95,11 +105,15 @@ local function drawStatic()
     for i = 1, maxVisible do
         local item = items[i]
         local row = ROW_FIRST_ITEM + i - 1
-        drawCell(X_GROUP, row, item.group, COL_GROUP_W, COLOR.dim)
-        drawCell(X_NAME, row, item.name, COL_NAME_W, COLOR.label)
-        drawCell(X_STORED, row, "?", COL_AMOUNT_W, COLOR.dim, true)
-        drawCell(X_THRESH, row, item.threshold or "-", COL_AMOUNT_W, COLOR.dim, true)
-        drawCell(X_STATUS, row, "Pending", COL_STATUS_W, COLOR.dim)
+        local bg = rowBg(row)
+        -- Paint the whole row first so the stripe covers column gaps too.
+        gpu.setBackground(bg)
+        gpu.fill(1, row, screenW, 1, " ")
+        drawCell(X_GROUP, row, item.group, COL_GROUP_W, COLOR.dim, false, bg)
+        drawCell(X_NAME, row, item.name, COL_NAME_W, COLOR.label, false, bg)
+        drawCell(X_STORED, row, "?", COL_AMOUNT_W, COLOR.dim, true, bg)
+        drawCell(X_THRESH, row, item.threshold or "-", COL_AMOUNT_W, COLOR.dim, true, bg)
+        drawCell(X_STATUS, row, "Pending", COL_STATUS_W, COLOR.dim, false, bg)
     end
 
     if #items > maxVisible then
@@ -117,28 +131,29 @@ local function updateFooter(passCount)
 end
 
 local function updateRow(row, item, itemsCrafting)
+    local bg = rowBg(row)
     local stored = ae2.getStored(item.name, item.fluid)
     drawCell(X_STORED, row, stored or "?", COL_AMOUNT_W,
-        stored and COLOR.label or COLOR.dim, true)
+        stored and COLOR.label or COLOR.dim, true, bg)
 
     if itemsCrafting[item.name] then
-        drawCell(X_STATUS, row, "Crafting", COL_STATUS_W, COLOR.crafting)
+        drawCell(X_STATUS, row, "Crafting", COL_STATUS_W, COLOR.crafting, false, bg)
         return
     end
 
-    drawCell(X_STATUS, row, "Checking...", COL_STATUS_W, COLOR.dim)
+    drawCell(X_STATUS, row, "Checking...", COL_STATUS_W, COLOR.dim, false, bg)
     local success, answer = ae2.requestItem(item.name, item.threshold, item.count, item.fluid)
 
     if success == true then
-        drawCell(X_STATUS, row, "Requested", COL_STATUS_W, COLOR.requested)
+        drawCell(X_STATUS, row, "Requested", COL_STATUS_W, COLOR.requested, false, bg)
     elseif success == false then
         if answer:find("not craftable") then
-            drawCell(X_STATUS, row, "Uncraftable", COL_STATUS_W, COLOR.uncraftable)
+            drawCell(X_STATUS, row, "Uncraftable", COL_STATUS_W, COLOR.uncraftable, false, bg)
         else
-            drawCell(X_STATUS, row, "Failed", COL_STATUS_W, COLOR.failed)
+            drawCell(X_STATUS, row, "Failed", COL_STATUS_W, COLOR.failed, false, bg)
         end
     else -- nil: threshold met, nothing to do
-        drawCell(X_STATUS, row, "OK", COL_STATUS_W, COLOR.ok)
+        drawCell(X_STATUS, row, "OK", COL_STATUS_W, COLOR.ok, false, bg)
     end
 end
 
@@ -159,6 +174,7 @@ end
 -- Restore a usable terminal even if the loop crashes or is interrupted.
 local ok, err = pcall(main)
 gpu.setForeground(0xFFFFFF)
+gpu.setBackground(0x000000)
 term.clear()
 if not ok then
     print("Maintainer2 stopped: " .. tostring(err))
