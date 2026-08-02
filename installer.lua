@@ -1,6 +1,6 @@
 local shell = require("shell")
 local filesystem = require("filesystem")
-local scripts = {"src/AE2.lua", "src/Utility.lua", "Maintainer.lua"}
+local scripts = {"src/AE2.lua", "src/Utility.lua", "Maintainer.lua", "Maintainer2.lua"}
 
 local paths = {"src", "lib"}
 
@@ -8,7 +8,7 @@ local function exists(filename)
     return filesystem.exists(shell.getWorkingDirectory() .. "/" .. filename)
 end
 
-local repo = "https://raw.githubusercontent.com/rajsugavanam/Smart-Maintainer/";
+local repo = "https://raw.githubusercontent.com/ReignOfFROZE/OC-Maintainer/";
 local branch = "master"
 
 for i = 1, #paths do
