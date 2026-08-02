@@ -40,26 +40,11 @@ function AE2.requestItem(name, threshold, count, fluidRegistry)
     if craftable then
         local item = craftable.getStack()
         if threshold ~= nil then
-            local itemInSystem = nil
+            local stored = AE2.getStored(name, fluidRegistry)
 
-            if fluidRegistry then
-                itemInSystem = ME.getFluidInNetwork(fluidRegistry)
-            else
-                if item.name then
-                    if item.tag then
-                        itemInSystem = ME.getItemInNetwork(item.name, item.damage or 0, item.tag)
-                    end
-
-                    -- Fallback: try with just the internal name and damage
-                    if itemInSystem == nil then
-                        itemInSystem = ME.getItemInNetwork(item.name, item.damage or 0)
-                    end
-                end
-            end
-
-            if itemInSystem ~= nil and itemInSystem.size >= threshold then
+            if stored >= threshold then
                 -- nil = nothing to do (threshold met), distinct from false = craft failed.
-                return nil, "The amount of " .. (itemInSystem.label or name) .. " (" .. itemInSystem.size .. ") meets or exceeds threshold (" .. threshold .. ")! Aborting request."
+                return nil, "The amount of " .. name .. " (" .. stored .. ") meets or exceeds threshold (" .. threshold .. ")! Aborting request."
             end
         end
 
@@ -79,28 +64,22 @@ function AE2.requestItem(name, threshold, count, fluidRegistry)
     return table.unpack({false, name .. " is not craftable!"})
 end
 
--- Returns the amount of an item/fluid in the network, or nil if it can't be resolved.
+-- Returns the amount of an item/fluid in the network.
+-- Items are matched by label: exact name+damage+NBT lookups miss items whose
+-- stored NBT differs from what getItemInNetwork reconstructs (it always attaches
+-- an empty {} tag), e.g. GT++ chem items like Alumina Milling Balls.
 function AE2.getStored(name, fluidRegistry)
     if fluidRegistry then
         local fluid = ME.getFluidInNetwork(fluidRegistry)
         return fluid and fluid.size or 0
     end
 
-    local craftable = getCraftableForItem(name)
-    if craftable then
-        local item = craftable.getStack()
-        if item.name then
-            local found = nil
-            if item.tag then
-                found = ME.getItemInNetwork(item.name, item.damage or 0, item.tag)
-            end
-            if found == nil then
-                found = ME.getItemInNetwork(item.name, item.damage or 0)
-            end
-            return found and found.size or 0
-        end
+    local stacks = ME.getItemsInNetwork({label = name})
+    local total = 0
+    for _, stack in ipairs(stacks) do
+        total = total + stack.size
     end
-    return nil
+    return total
 end
 
 function AE2.checkIfCrafting()
